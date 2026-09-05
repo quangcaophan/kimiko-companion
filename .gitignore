@@ -1,0 +1,17 @@
+# Thư viện Frontend (Thủ phạm gây >1000 files)
+node_modules/
+
+# Database SQLite sinh ra khi chạy hệ thống memory
+*.db
+*.db-wal
+*.db-shm
+
+# Python cache & môi trường ảo
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Config cá nhân & API keys
+.env
+test.ipynb
