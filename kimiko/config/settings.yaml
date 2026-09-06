@@ -2,8 +2,6 @@ embedding:
   lm_studio_host: "127.0.0.1"
   lm_studio_port: "1234"
   model: "text-embedding-bge-m3"
-  query_prefix: "search_query: "
-  document_prefix: "search_document: "
 memory:
   window_size: 20
   top_k: 5

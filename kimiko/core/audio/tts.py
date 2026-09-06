@@ -23,11 +23,11 @@ def clean_llm_output(text: str) -> str:
 
 
 class SovitsTTS:
-    def __init__(self, base_url: str, prompt_text: str,
+    def __init__(self, base_url: str, ref_audio_path: str, prompt_text: str,
                  prompt_lang: str, text_lang: str, speed_factor: float = 1.3) -> None:
         # tất cả tham số đọc từ persona.yaml["sovits_ping_config"], KHÔNG tự load yaml bên trong class
         self.base_url = base_url
-        self.ref_audio_path = os.path.abspath(r"kimiko\assets\character_files\main_sample.wav")
+        self.ref_audio_path = ref_audio_path
         self.prompt_text = prompt_text
         self.prompt_lang = prompt_lang
         self.text_lang = text_lang
@@ -110,9 +110,10 @@ if __name__ == "__main__":
 
     tts = SovitsTTS(
         base_url="http://127.0.0.1:9880",
+        ref_audio_path=os.path.abspath(r"kimiko/assets/character_files/main_sample.wav"),
         prompt_text="...", # Có thể để "" hoặc text mẫu của bạn
-        prompt_lang="en",
-        text_lang="en",
+        prompt_lang="vi",
+        text_lang="vi",
     )
 
     path, duration = tts.synthesize("hi", "test_tts.wav")

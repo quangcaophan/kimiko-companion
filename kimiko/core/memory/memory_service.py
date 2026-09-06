@@ -14,7 +14,7 @@ class MemoryService:
     def get_context(self, user_text:str):
         profile_summary = self.db.get_profile_summary()
         search_results = self.store.search(user_text, self.top_k)
-        facts = [doc["content"] for doc, score in search_results]
+        facts = [doc for doc, score in search_results]
         recent_turns = self.db.get_recent_turns(limit=self.window_size)
 
         return {
@@ -33,8 +33,6 @@ class MemoryService:
         if not aging_turns:
             return
         
-        #extract relevant fields
-        docs_to_embed = []
         for turn in aging_turns:
             format_text = f"{turn['role']}: {turn['content']}"
             self.store.add_fact(content = format_text, session_id = session_id, ts=turn['ts'])
@@ -56,10 +54,12 @@ class MemoryService:
         else:
             recent_block = "(chưa có)"
 
-        return f"""{persona}
-                Thông tin về User:{profile_block}
-                Các fact quan trọng về User:{fact_block}
-                Hội thoại gần đây:{recent_block}"""
+        return (
+            f"{persona}\n\n"
+            f"Thông tin về User:\n{profile_block}\n\n"
+            f"[Ký ức liên quan — KHÔNG phải tin nhắn hiện tại]:\n{fact_block}\n\n"
+            f"Hội thoại gần đây:\n{recent_block}"
+        )
 
     def maybe_summarize(self, session_id: int) -> None:
         pass  # TODO: quyết định trigger — xem plan.md mục 7

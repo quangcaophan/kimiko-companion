@@ -1,7 +1,6 @@
 from groq import Groq
 from dotenv import load_dotenv
 import os
-from faster_whisper import WhisperModel
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
@@ -15,10 +14,9 @@ class GroqASR:
         self.client = self.get_groq_client()
         
     def get_groq_client(self):
-        key = os.getenv("GROQ_API_KEY")
-        if not key:
+        if not self.api_key:
             raise EnvironmentError("GROQ_API_KEY not set")
-        return Groq(api_key=key)
+        return Groq(api_key=self.api_key)
 
     def record(self, output_file: str, samplerate: int = 44100, channels: int = 1,
                silence_threshold: float = 0.02, silence_duration: float = 1.0,
@@ -81,28 +79,22 @@ class GroqASR:
             return False
 
 
-    def transcribe(self, aud_path: str = r"kimiko\assets\character_files\main_sample.wav") -> str:
+    def transcribe(self, aud_path: str) -> str:
         """Transcribe a WAV via Groq Whisper-large-v3. Returns the spoken text."""
 
         if not aud_path:
             return "There is no Audio path"
 
-        if self.client:
-            with open(aud_path, "rb") as file:
-                transcription = self.client.audio.transcriptions.create(
-                    file=(aud_path, file.read()),
-                    model="whisper-large-v3",
-                    response_format="verbose_json"
-                )
-            text = transcription.text
-            print(f"[asr.transcribe] {text!r}")
-            return text
-        else: 
-            model = WhisperModel("base", device="cpu")
-            segments, _ = model.transcribe(aud_path, language="en")
-            text = " ".join(seg.text for seg in segments).strip()
-            print(f"[asr.transcribe] {text!r}")
-            return text
+        with open(aud_path, "rb") as file:
+            transcription = self.client.audio.transcriptions.create(
+                file=(aud_path, file.read()),
+                model="whisper-large-v3",
+                response_format="verbose_json",
+                prompt=self.context_prompt
+            )
+        text = transcription.text
+        print(f"[asr.transcribe] {text!r}")
+        return text
 
 
 # if __name__ == "__main__":
