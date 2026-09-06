@@ -3,7 +3,7 @@ import os
 import time
 
 class MemoryDB:
-    def __init__(self, db_path: str = 'riko2/core/memory/memory.db'):
+    def __init__(self, db_path: str = 'kimiko/core/memory/memory.db'):
         self.db_path = db_path
 
         db_dir = os.path.dirname(self.db_path)

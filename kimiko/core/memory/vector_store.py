@@ -1,6 +1,6 @@
 from typing import Optional, Any, List, Dict, Tuple
 import re
-from riko2.core.memory.db import MemoryDB
+from kimiko.core.memory.db import MemoryDB
 from collections import Counter
 from typing import Callable
 import json

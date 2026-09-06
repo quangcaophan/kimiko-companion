@@ -1,0 +1,7 @@
+sovits_ping_config:
+  base_url: "http://127.0.0.1:9880"
+  ref_audio_path: "character_files/main_sample.wav"
+  prompt_text: "..."      # lấy đúng giá trị từ character_config.yaml gốc
+  prompt_lang: "vi"        # hoặc giá trị gốc bạn đang dùng
+  text_lang: "vi"
+  speed_factor: 1.3

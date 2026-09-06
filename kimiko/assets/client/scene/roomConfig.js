@@ -5,7 +5,7 @@
  * position / rotation / scale are [x, y, z]. Rotation is in radians.
  *
  * `fixDepth`: enables depthWrite/depthTest + polygonOffset on every mesh.
- * Useful for rooms that show z-fighting artifacts (e.g. RikoRoomFixed).
+ * Useful for rooms that show z-fighting artifacts (e.g. KimikoRoomFixed).
  */
 
 export const ROOM_CONFIG = {

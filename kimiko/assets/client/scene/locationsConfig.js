@@ -9,7 +9,7 @@
  *
  * Set DEBUG_MARKERS to true to render a small colored sphere at each named
  * location for visual verification.
- * [positive is left of riko, negative is right of riko,positive is up, negative is down,positive is in front of riko, negative is behind]
+ * [positive is left of kimiko, negative is right of kimiko,positive is up, negative is down,positive is in front of kimiko, negative is behind]
  */
 
 export const DEBUG_MARKERS = false;
