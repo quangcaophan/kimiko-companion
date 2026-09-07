@@ -105,15 +105,15 @@ export class AnimationManager {
       transitionEaseSpeed: 0.08,   // Speed of smooth reset to center (direct lerp, not physics)
 
       // Smooth movement physics (for idle state - slow, smooth movements)
-      headAcceleration: 0.001,      // Base acceleration (idle uses this for smooth look-around)
-      headDamping: 0.85,           // Velocity damping (1 = no damping, 0 = instant stop)
+      headAcceleration: 0.005,      // Base acceleration — raised from 0.001; update-order fix makes this effective
+      headDamping: 0.88,           // Velocity damping — lowered from 0.85; less decay so head reaches targets
 
       // State-specific acceleration multipliers (relative to base)
       stateAcceleration: {
-        idle: 1.0,        // Use base acceleration (smooth, slow)
-        listening: 8.0,   // 8x faster for responsive nods
-        thinking: 2.0,    // 2x for moderate responsiveness
-        talking: 10.0     // 15x faster for visible nods and tilts
+        idle: 1.0,        // 0.015 effective — smooth, slow look-around
+        listening: 5.0,   // 0.12 effective — responsive nods
+        thinking: 1.8,    // 0.03 effective — moderate
+        talking: 1.5,    // 0.15 effective — snappy emphasis nods
       },
 
       // State-specific config
@@ -133,11 +133,11 @@ export class AnimationManager {
           lookAtUserEyeReset: true     // Also reset eyes to center when looking at user
         },
         listening: {
-          nodIntensity: 0.35,          // Gentler nods
+          nodIntensity: 0.15,          // Gentler nods
           nodCount: 2,                 // Do 2 nods
           nodDuration: 2.0,           // Duration of each nod
           nodsChance: 0.3,             // Chance per 2 seconds to nod
-          headEase: 0.01,              // Smooth easing
+          headEase: 0.005,              // Smooth easing
           eyeRange: 5.0,               // Smaller eye range - focused on user
           // NEW: Side glance settings
           sideLookChance: 0.15,        // Chance per second to glance to side
@@ -166,15 +166,15 @@ export class AnimationManager {
           lookAtUserDurationMax: 2.0   // Max duration looking at user
         },
         talking: {
-          nodIntensity: 0.5,          // Base nod intensity
-          nodFrequency: 1.8,           // Base nods per second
+          nodIntensity: 0.4,          // Base nod intensity
+          nodFrequency: 1.4,           // Base nods per second
           nodVariation: 0.6,           // Variation in nod strength
-          headEase: 0.045,             // Moderate easing
+          headEase: 0.055,             // Moderate easing
           occasionalTurn: 0.2,         // Occasional head turns
           eyeRange: 6.0,               // Normal eye range while talking
           // NEW: Variable nodding settings
-          nodIntensityVariation: 0.4,  // +/- 40% intensity variation
-          nodFrequencyVariation: 0.5,  // +/- 50% frequency variation
+          nodIntensityVariation: 0.1,  // +/- 40% intensity variation
+          nodFrequencyVariation: 0.1,  // +/- 50% frequency variation
           nodChangeInterval: 1.5,      // Change nod params every 1.5 seconds
           // NEW: Head tilt while talking
           tiltChance: 0.25,            // Chance per second for head tilt

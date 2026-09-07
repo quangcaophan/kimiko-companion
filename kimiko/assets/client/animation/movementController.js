@@ -336,9 +336,20 @@ export class MovementController {
     let targetWorldX = this.vrm.scene.position.x;
     let targetWorldZ = this.vrm.scene.position.z;
     if (track_position && !lock_position && hipsNode) {
-      targetWorldX += hipsNode.position.x;
-      targetWorldZ += hipsNode.position.z;
+      // Use world position so the result is correct regardless of vrm.scene rotation.
+      // hipsNode.position is LOCAL to vrm.scene — adding it directly to world coords
+      // gives wrong results when the model is rotated (e.g. after walking anywhere
+      // other than straight forward). getWorldPosition accounts for all parent transforms.
+      const hipsWorldPos = new THREE.Vector3();
+      hipsNode.getWorldPosition(hipsWorldPos);
+      targetWorldX = hipsWorldPos.x;
+      targetWorldZ = hipsWorldPos.z;
     }
+
+    // Reset spring bones (hair/accessories) to prevent the 1-2s freeze that occurs
+    // when colliders clip through hair during displacement animations.
+    // Remove this line if an instant snap is less desirable than the gradual settle.
+    if (this.vrm.springBoneManager) this.vrm.springBoneManager.reset();
 
     // Crossfade external → idle natively on the same mixer.
     this._crossFadeTo(this.actions.idle, this.externalFadeDuration);
@@ -467,8 +478,14 @@ export class MovementController {
       const { targetWorldX, targetWorldZ, endAt } = this._positionCompensation;
       const hipsNode = this.vrm.humanoid?.getNormalizedBoneNode('hips');
       if (hipsNode) {
-        this.vrm.scene.position.x = targetWorldX - hipsNode.position.x;
-        this.vrm.scene.position.z = targetWorldZ - hipsNode.position.z;
+        // Correct for scene rotation: get the hips actual world position each frame,
+        // then nudge the scene so hips land exactly at the captured target.
+        // This replaces the old local-space subtraction which broke when the model
+        // was rotated after walking in any direction other than straight forward.
+        const hipsWorldPos = new THREE.Vector3();
+        hipsNode.getWorldPosition(hipsWorldPos);
+        this.vrm.scene.position.x += targetWorldX - hipsWorldPos.x;
+        this.vrm.scene.position.z += targetWorldZ - hipsWorldPos.z;
       }
       if (performance.now() >= endAt) this._positionCompensation = null;
     }
