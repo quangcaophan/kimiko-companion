@@ -45,20 +45,24 @@ class MemoryService:
             fact_lines = [f"- {f['content'] if isinstance(f, dict) else f}" for f in context["facts"]]
             fact_block = "\n".join(fact_lines)
         else:
-            fact_block = "(chưa có ký ức nào liên quan)"
+            fact_block = "(no relevant memories yet)"
 
-        profile_block = context.get("profile") or "(chưa có thông tin về người dùng)"
+        profile_block = context.get("profile") or "(no user profile info yet)"
 
         if context.get("recent_turns"):
             recent_block = "\n".join(f"{t['role']}: {t['content']}" for t in context["recent_turns"])
         else:
-            recent_block = "(chưa có)"
+            recent_block = "(none)"
 
         return (
             f"{persona}\n\n"
-            f"Thông tin về User:\n{profile_block}\n\n"
-            f"[Ký ức liên quan — KHÔNG phải tin nhắn hiện tại]:\n{fact_block}\n\n"
-            f"Hội thoại gần đây:\n{recent_block}"
+            f"User Profile:\n{profile_block}\n\n"
+            f"[Relevant Memories — NOT current messages]:\n{fact_block}\n\n"
+            f"Recent Conversation:\n{recent_block}\n\n"
+            f"Subtitle Instruction:\n"
+            f"You speak English. For your response, format your speech with Vietnamese subtitles using this exact structure:\n"
+            f"[EN] <Spoken English response>\n"
+            f"[VI] <Vietnamese subtitle translation>"
         )
 
     def maybe_summarize(self, session_id: int) -> None:

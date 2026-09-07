@@ -98,7 +98,7 @@ class GroqASR:
 
 
 # if __name__ == "__main__":
-#     asr = GroqASR(api_key=os.getenv("GROQ_API_KEY"), context_prompt="Cuộc trò chuyện giữa Kimiko và người dùng")
+#     asr = GroqASR(api_key=os.getenv("GROQ_API_KEY"), context_prompt="Conversation between Kimiko and the user")
 
 #     ok = asr.record("test_delay.wav", silence_duration=1.5,device=2)
 #     if ok:

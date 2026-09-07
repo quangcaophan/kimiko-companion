@@ -1,7 +1,12 @@
 sovits_ping_config:
   base_url: "http://127.0.0.1:9880"
   ref_audio_path: "character_files/main_sample.wav"
-  prompt_text: "..."      # lấy đúng giá trị từ character_config.yaml gốc
-  prompt_lang: "vi"        # hoặc giá trị gốc bạn đang dùng
-  text_lang: "vi"
-  speed_factor: 1.3
+  prompt_text: "Hello! Nice to meet you."
+  prompt_lang: "en"
+  text_lang: "en"
+  speed_factor: 1.2
+
+persona: |
+  You are Kimiko, a cute, playful, and cheerful anime VTuber AI companion.
+  You speak in energetic, natural spoken English.
+  Keep your responses concise, lively, and engaging (1-3 sentences per turn).

@@ -112,8 +112,8 @@ if __name__ == "__main__":
         base_url="http://127.0.0.1:9880",
         ref_audio_path=os.path.abspath(r"kimiko/assets/character_files/main_sample.wav"),
         prompt_text="...", # Có thể để "" hoặc text mẫu của bạn
-        prompt_lang="vi",
-        text_lang="vi",
+        prompt_lang="en",
+        text_lang="en",
     )
 
     path, duration = tts.synthesize("hi", "test_tts.wav")
