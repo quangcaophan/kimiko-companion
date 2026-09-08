@@ -1,28 +1,58 @@
 import sqlite3
 import os
 import time
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from contextlib import contextmanager
+
+
 
 class MemoryDB:
-    def __init__(self, db_path: str = 'kimiko/core/memory/memory.db'):
+    """SQLite-based persistent database for conversations, facts, sessions, and click actions."""
+
+    def __init__(self, db_path: str = 'kimiko/core/memory/memory.db') -> None:
+        if not os.path.isabs(db_path):
+            if not os.path.exists(db_path):
+                alt = Path(__file__).resolve().parent / os.path.basename(db_path)
+                if alt.parent.exists():
+                    db_path = str(alt)
         self.db_path = db_path
 
         db_dir = os.path.dirname(self.db_path)
         if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir)
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except OSError as e:
+                print(f"[MemoryDB] Failed to create database directory {db_dir}: {e}")
+
 
         self.init_db()
 
-    def get_connection(self):
-        conn = sqlite3.connect(self.db_path)
+    def get_connection(self) -> sqlite3.Connection:
+        """Return a SQLite connection configured with WAL mode and a 10-second busy timeout."""
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         return conn
 
-    def init_db(self):
-        with self.get_connection() as conn:
+    @contextmanager
+    def _conn(self):
+        """Context manager guaranteeing transaction commit, rollback on error, and connection closing."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                yield conn
+        except sqlite3.Error as e:
+            print(f"[MemoryDB] Database error: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def init_db(self) -> None:
+        """Initialize database tables idempotently."""
+        with self._conn() as conn:
             cursor = conn.cursor()
 
-            # Thêm IF NOT EXISTS vào tất cả các câu lệnh CREATE TABLE
             cursor.execute("""CREATE TABLE IF NOT EXISTS turns(
                 id INTEGER PRIMARY KEY,
                 ts REAL,
@@ -59,42 +89,39 @@ class MemoryDB:
     # --- turns table ---
     #--------------------
     def insert_turn(self, role: str, content: str, ts: float) -> int:
-        """Chèn một lượt hội thoại mới và trả về id vừa tạo"""
-        with self.get_connection() as conn:
+        """Insert a new conversation turn and return created id."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO turns (ts, role, content) VALUES (?, ?, ?)",
                 (ts, role, content)
             )
-            # Trả về id của bản ghi vừa chèn
             return cursor.lastrowid
 
-    def get_recent_turns(self, limit: int) -> list[dict]:
-        """Lấy các lượt hội thoại gần nhất, trả về danh sách dict"""
-        with self.get_connection() as conn:
+    def get_recent_turns(self, limit: int) -> List[Dict[str, Any]]:
+        """Fetch the most recent turns, returned in chronological order (oldest to newest)."""
+        with self._conn() as conn:
             cursor = conn.cursor()
-            # Sắp xếp giảm dần theo id hoặc ts để lấy mới nhất, nhưng đảo ngược lại để đúng thứ tự thời gian
             cursor.execute(
                 "SELECT id, ts, role, content, embedded FROM turns ORDER BY id DESC LIMIT ?",
                 (limit,)
             )
             rows = cursor.fetchall()
             
-            # Chuyển đổi các sqlite3.Row thành dict để dễ xử lý ở tầng trên
             result = [dict(row) for row in rows]
-            result.reverse() # Đảo lại để hội thoại đi từ cũ đến mới
+            result.reverse()  # Reverse so conversation flows chronologically
             return result
 
-    def get_turns_to_embed(self, window_size: int) -> list[dict]:
-        with self.get_connection() as conn:
+    def get_turns_to_embed(self, window_size: int) -> List[Dict[str, Any]]:
+        """Retrieve turns outside the recent active window that have not yet been embedded."""
+        with self._conn() as conn:
             cursor = conn.cursor()
-            # Tìm id của turn đứng ở vị trí thứ window_size tính từ mới nhất
             cursor.execute(
                 "SELECT id FROM turns ORDER BY id DESC LIMIT 1 OFFSET ?", (window_size - 1,)
             )
             boundary_row = cursor.fetchone()
             if boundary_row is None:
-                return []   # chưa đủ turns để có gì "già" ra khỏi cửa sổ
+                return []   # Not enough turns to fall outside the window
             boundary_id = boundary_row["id"]
 
             cursor.execute(
@@ -103,19 +130,21 @@ class MemoryDB:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def mark_turns_embedded(self, turn_ids: list[int]):
-        with self.get_connection() as conn:
+    def mark_turns_embedded(self, turn_ids: List[int]) -> None:
+        """Mark specific turns as embedded in vector store."""
+        if not turn_ids:
+            return
+        with self._conn() as conn:
             cursor = conn.cursor()
             placeholders = ",".join(["?"] * len(turn_ids))
             cursor.execute(f"UPDATE turns SET embedded = 1 WHERE id IN ({placeholders})", turn_ids)
-
 
     #---------------------------
     # --- memory_facts table ---
     #---------------------------
     def insert_memory_fact(self, content: str, ts: float, session_id: int, vector_json: str) -> int:
-        """Lưu một sự kiện bộ nhớ kèm vector định dạng JSON, trả về id"""
-        with self.get_connection() as conn:
+        """Store a memory fact with JSON vector representation, returning its id."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO memory_facts (content, ts, session_id, vector_json) VALUES (?, ?, ?, ?)",
@@ -123,36 +152,33 @@ class MemoryDB:
             )
             return cursor.lastrowid
 
-    def get_all_memory_facts(self) -> list[sqlite3.Row]:
-        """Lấy toàn bộ sự kiện bộ nhớ, trả về danh sách sqlite3.Row nguyên bản"""
-        with self.get_connection() as conn:
+    def get_all_memory_facts(self) -> List[sqlite3.Row]:
+        """Retrieve all memory facts as sqlite3.Row objects ordered by timestamp."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM memory_facts ORDER BY ts ASC")
-            # row_factory = sqlite3.Row đã cấu hình ở get_connection nên fetchall sẽ trả về list[sqlite3.Row]
             return cursor.fetchall()
 
     #-----------------------
     # --- sessions table ---
     #-----------------------
     def get_or_create_session(self) -> int:
-        """Tìm session chưa kết thúc (ended_at IS NULL), nếu không có thì tạo mới và trả về id"""
-        with self.get_connection() as conn:
+        """Find an unended session (ended_at IS NULL) or create a new one, returning its id."""
+        with self._conn() as conn:
             cursor = conn.cursor()
-            # 1. Tìm session hiện tại chưa đóng
             cursor.execute("SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
             
             if row:
                 return row['id']
             
-            # 2. Nếu không có, tiến hành tạo mới
             current_ts = time.time()
             cursor.execute("INSERT INTO sessions (started_at, ended_at) VALUES (?, NULL)", (current_ts,))
             return cursor.lastrowid
 
-    def close_session(self, session_id: int):
-        """Cập nhật thời gian kết thúc cho một session"""
-        with self.get_connection() as conn:
+    def close_session(self, session_id: int) -> None:
+        """Update ended_at timestamp for a session."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             current_ts = time.time()
             cursor.execute(
@@ -160,21 +186,20 @@ class MemoryDB:
                 (current_ts, session_id)
             )
 
-
     #----------------------
     # --- profile table ---
     #----------------------
     def get_profile_summary(self) -> str:
-        """Lấy thông tin tóm tắt profile mới nhất, nếu trống trả về chuỗi rỗng"""
-        with self.get_connection() as conn:
+        """Retrieve the latest profile summary, or empty string if none exists."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT summary FROM profile ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
             return row['summary'] if row else ""
 
-    def set_profile_summary(self, summary: str):
-        """Cập nhật hoặc thêm mới tóm tắt profile"""
-        with self.get_connection() as conn:
+    def set_profile_summary(self, summary: str) -> None:
+        """Append a new profile summary entry."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             current_ts = time.time()
 
@@ -183,37 +208,32 @@ class MemoryDB:
                 (summary, current_ts)
             )
 
-
     #------------------------------
     # --- pending_actions table --- 
     #------------------------------
-    def insert_pending_action(self, region: str, bone: str, ts: float):
-        """Chèn một hành động đang chờ xử lý"""
-        with self.get_connection() as conn:
+    def insert_pending_action(self, region: str, bone: str, ts: float) -> None:
+        """Insert a pending click action."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO pending_actions (region, bone, ts, consumed) VALUES (?, ?, ?, 0)",
                 (region, bone, ts)
             )
 
-    def pop_pending_actions(self) -> list[dict]:
-        """Lấy các hành động chưa xử lý (consumed=0), đánh dấu chúng thành đã xử lý (=1) rồi trả về dữ liệu"""
-        with self.get_connection() as conn:
+    def pop_pending_actions(self) -> List[Dict[str, Any]]:
+        """Atomically fetch unconsumed actions (consumed=0) and mark them as consumed (=1)."""
+        with self._conn() as conn:
             cursor = conn.cursor()
             
-            # 1. SELECT các hành động chưa tiêu thụ
             cursor.execute("SELECT id, region, bone, ts FROM pending_actions WHERE consumed = 0")
             rows = cursor.fetchall()
             
             if not rows:
                 return []
             
-            # Chuyển đổi dữ liệu sang dict trước khi update để tránh mất dấu dữ liệu
             actions = [dict(row) for row in rows]
             
-            # 2. Gom các ID lại để UPDATE một lượt (Tối ưu hóa performance)
             ids = [action['id'] for action in actions]
-            # Tạo chuỗi ?,?,? tương ứng với số lượng ID
             placeholders = ",".join(["?"] * len(ids)) 
             
             cursor.execute(
@@ -222,6 +242,7 @@ class MemoryDB:
             )
             
             return actions
+
 
     
     

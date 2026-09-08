@@ -10,20 +10,20 @@ broadcast, so the client sees the same message types regardless of source.
 """
 import random
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Dict, Any, List
 
 
 SOUND_DIR = Path("public/sounds")
 ANIM_VRMA_DIR = Path("animations/vrma_xr")
 ANIM_MIXAMO_DIR = Path("animations/mixamo")
 
-FEEDBACK_SOUNDS = [
+FEEDBACK_SOUNDS: List[Tuple[str, str]] = [
     ("oh.wav", "oh?"),
     ("hey.wav", "hey"),
 ]
 
 
-def _talk_payload(audio_path: Path, text: str, duration: int = 1, expression: str = "relaxed") -> dict:
+def _talk_payload(audio_path: Path, text: str, duration: int = 1, expression: str = "relaxed") -> Dict[str, Any]:
     return {
         "type": "start_animation",
         "audio_path": str(audio_path),
@@ -33,7 +33,7 @@ def _talk_payload(audio_path: Path, text: str, duration: int = 1, expression: st
     }
 
 
-def _vrma_payload(animation_path: Path, crop_start: float = 0.0, crop_end: float = 0.0) -> dict:
+def _vrma_payload(animation_path: Path, crop_start: float = 0.0, crop_end: float = 0.0) -> Dict[str, Any]:
     return {
         "type": "start_vrma",
         "animation_url": str(animation_path),
@@ -45,7 +45,7 @@ def _vrma_payload(animation_path: Path, crop_start: float = 0.0, crop_end: float
     }
 
 
-def _idle_payload() -> dict:
+def _idle_payload() -> Dict[str, Any]:
     return {
         "type": "start_mixamo",
         "animation_url": str(ANIM_MIXAMO_DIR / "Idle.fbx"),
@@ -82,7 +82,7 @@ def _pick_animation(region: str, bone: str) -> Tuple[Path, float, float]:
     return ANIM_VRMA_DIR / "stop_it.vrma", 0.82, 1.7
 
 
-def build_click_reaction(region: str, bone: str) -> dict:
+def build_click_reaction(region: str, bone: str) -> Dict[str, Any]:
     """Build the sound + animation + idle payloads for a click interaction.
 
     Returns a dict with keys:

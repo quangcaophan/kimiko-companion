@@ -5,42 +5,54 @@ from kimiko.core.memory.vector_store import PersistentHybridStore
 
 
 class MemoryService:
-    def __init__(self, db:MemoryDB, store:PersistentHybridStore, window_size:int = 20, top_k: int = 5):
+    """High-level memory orchestrator combining SQLite turns/profiles and hybrid vector search."""
+
+    def __init__(
+        self,
+        db: MemoryDB,
+        store: PersistentHybridStore,
+        window_size: int = 20,
+        top_k: int = 5
+    ) -> None:
         self.db = db
         self.store = store
         self.window_size = window_size
         self.top_k = top_k
     
-    def get_context(self, user_text:str):
+    def get_context(self, user_text: str) -> Dict[str, Any]:
+        """Retrieve relevant context for a user query: profile, semantic facts, and recent conversation turns."""
         profile_summary = self.db.get_profile_summary()
         search_results = self.store.search(user_text, self.top_k)
         facts = [doc for doc, score in search_results]
         recent_turns = self.db.get_recent_turns(limit=self.window_size)
 
         return {
-            "profile":profile_summary,
-            "facts":facts,
-            "recent_turns":recent_turns
+            "profile": profile_summary,
+            "facts": facts,
+            "recent_turns": recent_turns
         }
     
-    def record_turn(self, role:str, content:str, session_id:int):
-        self.db.insert_turn(role = role, content=content, ts=time.time())
+    def record_turn(self, role: str, content: str, session_id: int) -> None:
+        """Record a conversation turn and flush aging turns outside the active window to vector memory."""
+        self.db.insert_turn(role=role, content=content, ts=time.time())
         self._flush_aging_turns(session_id=session_id)
 
-    def _flush_aging_turns(self, session_id: int):
-        aging_turns = self.db.get_turns_to_embed(window_size= self.window_size)
+    def _flush_aging_turns(self, session_id: int) -> None:
+        """Check for turns that have aged out of the active window and embed them into persistent hybrid store."""
+        aging_turns = self.db.get_turns_to_embed(window_size=self.window_size)
         
         if not aging_turns:
             return
         
         for turn in aging_turns:
             format_text = f"{turn['role']}: {turn['content']}"
-            self.store.add_fact(content = format_text, session_id = session_id, ts=turn['ts'])
+            self.store.add_fact(content=format_text, session_id=session_id, ts=turn['ts'])
         
         turn_ids = [turn['id'] for turn in aging_turns]
         self.db.mark_turns_embedded(turn_ids)
     
     def build_system_prompt(self, persona: str, context: Dict[str, Any]) -> str:
+        """Compose the full system instruction prompt with profile, retrieved facts, recent turns, and subtitle instructions."""
         if context.get("facts"):
             fact_lines = [f"- {f['content'] if isinstance(f, dict) else f}" for f in context["facts"]]
             fact_block = "\n".join(fact_lines)
@@ -66,4 +78,4 @@ class MemoryService:
         )
 
     def maybe_summarize(self, session_id: int) -> None:
-        pass  # TODO: quyết định trigger — xem plan.md mục 7
+        pass  # TODO: determine trigger criteria (see doc/implement plan.md)
