@@ -1,5 +1,4 @@
 from typing import Tuple
-from dotenv import load_dotenv
 import requests
 import os
 import re
@@ -7,6 +6,10 @@ import emoji
 import subprocess
 import time
 import soundfile as sf
+
+from kimiko.core.logger import get_logger
+
+logger = get_logger("audio.tts")
 
 
 def clean_llm_output(text: str) -> str:
@@ -40,6 +43,10 @@ class SovitsTTS:
         self.prompt_lang: str = prompt_lang
         self.text_lang: str = text_lang
         self.speed_factor: float = speed_factor
+        logger.debug(
+            f"Initialized SovitsTTS: base_url={self.base_url}, "
+            f"ref_audio={os.path.basename(self.ref_audio_path)}, speed={self.speed_factor}"
+        )
 
     def synthesize(self, text: str, output_wav_path: str) -> Tuple[str, float]:
         """Synthesize text into a WAV audio file via GPT-SoVITS.
@@ -51,19 +58,22 @@ class SovitsTTS:
         Returns:
             Tuple of (output_wav_path, audio_duration_in_seconds).
         """
+        logger.debug(f"Synthesis requested for: {text!r}")
         text_cleaned = clean_llm_output(text)
         if not text_cleaned:
+            logger.warning("Synthesis skipped: input text cleaned to empty string.")
             return ("", 0.0)
 
-        # Validate reference audio existence
-        if not os.path.exists(self.ref_audio_path):
-            print(f"[SovitsTTS.synthesize] Reference audio file missing: {self.ref_audio_path}")
+        # Validate reference audio existence (convert to absolute path for external server)
+        abs_ref = os.path.abspath(self.ref_audio_path)
+        if not os.path.exists(abs_ref):
+            logger.error(f"Reference audio file missing on disk: {abs_ref}")
             return ("", 0.0)
 
         payload = {
             "text": text_cleaned,
             "text_lang": self.text_lang,
-            "ref_audio_path": self.ref_audio_path,
+            "ref_audio_path": abs_ref,
             "prompt_text": self.prompt_text,
             "prompt_lang": self.prompt_lang,
             "speed_factor": self.speed_factor
@@ -74,70 +84,83 @@ class SovitsTTS:
             try:
                 os.makedirs(out_dir, exist_ok=True)
             except OSError as e:
-                print(f"[SovitsTTS.synthesize] Failed to create output directory {out_dir}: {e}")
+                logger.error(f"Failed to create output directory {out_dir}: {e}")
                 return ("", 0.0)
 
         url = f"{self.base_url.rstrip('/')}/tts"
+        logger.info(f"Sending synthesis request to GPT-SoVITS ({url}): {text_cleaned[:50]!r}...")
+        t_start = time.time()
         try:
             response = requests.post(url, json=payload, timeout=30)
         except requests.exceptions.Timeout:
-            print(f"[SovitsTTS.synthesize] Request to {url} timed out (30s).")
+            logger.error(f"Request to GPT-SoVITS at {url} timed out after 30 seconds.")
             return ("", 0.0)
         except requests.exceptions.ConnectionError:
-            print(f"[SovitsTTS.synthesize] Could not connect to GPT-SoVITS server at {url}. Is it running?")
+            logger.error(f"Could not connect to GPT-SoVITS server at {url}. Ensure server is running on port 9880.")
             return ("", 0.0)
         except requests.exceptions.RequestException as e:
-            print(f"[SovitsTTS.synthesize] Network request failed for {url}: {e}")
+            logger.error(f"Network request failed for {url}: {e}")
             return ("", 0.0)
+
+        elapsed = time.time() - t_start
 
         if response.status_code != 200 or not response.content:
             err_detail = response.text[:200] if response.text else "empty response"
-            print(f"[SovitsTTS.synthesize] GPT-SoVITS returned HTTP {response.status_code}: {err_detail}")
+            logger.error(f"GPT-SoVITS returned HTTP {response.status_code} in {elapsed:.2f}s: {err_detail}")
             return ("", 0.0)
 
         # Validate WAV payload format
         if len(response.content) < 44 or not response.content.startswith(b"RIFF"):
-            print("[SovitsTTS.synthesize] Received invalid audio format (missing RIFF WAV header).")
+            logger.error(
+                f"Received invalid audio format ({len(response.content)} bytes, missing 'RIFF' header)."
+            )
             return ("", 0.0)
         
         try:
             with open(output_wav_path, "wb") as f:
                 f.write(response.content)
             duration: float = sf.info(output_wav_path).duration
+            logger.info(
+                f"Audio synthesized successfully in {elapsed:.2f}s: {output_wav_path} "
+                f"({len(response.content)} bytes, duration: {duration:.2f}s)"
+            )
             return output_wav_path, duration
         except Exception as e:
-            print(f"[SovitsTTS.synthesize] Failed to write or parse audio file: {e}")
+            logger.error(f"Failed to write or inspect audio file {output_wav_path}: {e}")
             return ("", 0.0)
 
 
 def _start_sovits(
-    sovits_dir: str = r"C:\GPT-SoVITS-v2pro-20250604\GPT-SoVITS-v2pro-20250604",
+    sovits_dir: str = "",
     base_url: str = "http://127.0.0.1:9880",
     max_retries: int = 20,
     wait_time: int = 2
 ) -> bool:
     """Automatically verify and launch GPT-SoVITS server if not running."""
+    if not sovits_dir:
+        sovits_dir = os.getenv("SOVITS_DIR", r"C:\GPT-SoVITS-v2pro-20250604\GPT-SoVITS-v2pro-20250604")
+    logger.info(f"Checking GPT-SoVITS server status at {base_url}...")
     
     # 1. Check if server is already running
     try:
         res = requests.get(f"{base_url}/control", timeout=2)
         if res.status_code in {200, 400}:
-            print("GPT-SoVITS server is running!")
+            logger.info("GPT-SoVITS server is already online and responsive.")
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"GPT-SoVITS probe failed ({e}). Will attempt to launch.")
 
     # 2. Launch batch script in SoVITS directory
     if not os.path.isdir(sovits_dir):
-        print(f"[SovitsTTS] Directory not found: {sovits_dir}")
+        logger.warning(f"GPT-SoVITS directory not found on system: {sovits_dir}")
         return False
 
     bat_path = os.path.join(sovits_dir, "go-api.bat")
     if not os.path.exists(bat_path):
-        print(f"[SovitsTTS] Cannot find startup script: {bat_path}")
+        logger.warning(f"Startup script not found: {bat_path}")
         return False
 
-    print("Starting GPT-SoVITS in a new window...")
+    logger.info(f"Launching GPT-SoVITS server via {bat_path}...")
     try:
         subprocess.Popen(
             f'cmd.exe /c start "" "{bat_path}"',
@@ -145,44 +168,20 @@ def _start_sovits(
             shell=True
         )
     except Exception as e:
-        print(f"[SovitsTTS] Failed to spawn GPT-SoVITS process: {e}")
+        logger.error(f"Failed to spawn GPT-SoVITS process: {e}")
         return False
     
     # 3. Wait for server to load model and open port
-    print("Waiting for server to load model", end="", flush=True)
-    for _ in range(max_retries):
+    logger.info(f"Waiting for GPT-SoVITS to load PyTorch weights (up to {max_retries * wait_time}s)...")
+    for attempt in range(1, max_retries + 1):
         time.sleep(wait_time)
         try:
             res = requests.get(f"{base_url}/control", timeout=2)
             if res.status_code in {200, 400}:
-                print("\nGPT-SoVITS Server is ready!")
+                logger.info(f"GPT-SoVITS server is ready! (attempt {attempt}/{max_retries})")
                 return True
         except Exception:
-            print(".", end="", flush=True)
-    print("\nStartup Failed (Timeout).")
+            logger.debug(f"Waiting for GPT-SoVITS... (attempt {attempt}/{max_retries})")
+
+    logger.error("GPT-SoVITS startup timed out after waiting.")
     return False
-
-
-
-
-# if __name__ == "__main__":
-#     _start_sovits() # Automatically check or start server
-
-#     tts = SovitsTTS(
-#         base_url="http://127.0.0.1:9880",
-#         ref_audio_path=os.path.abspath(r"kimiko/assets/character_files/main_sample.wav"),
-#         prompt_text="", 
-#         prompt_lang="en",
-#         text_lang="en",
-#     )
-
-#     path, duration = tts.synthesize("""Another wander in the night
-#                     Let me paint the view
-#                     Color a town with my light
-#                     For every moment shared with you
-#                     Not out in the day
-#                     But never fully gone
-#                     Going to be back again
-#                     Until the coming of a dawn
-#                     """, "test_tts.wav")
-#     print("✅ Generated file:", path, "- Duration:", duration)

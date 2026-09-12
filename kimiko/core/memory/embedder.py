@@ -1,6 +1,10 @@
 from typing import Union, List
 from openai import OpenAI
 
+from kimiko.core.logger import get_logger
+
+logger = get_logger("memory.embedder")
+
 
 class LMStudioEmbedder:
     """Local text embedding client using LM Studio's OpenAI-compatible API."""
@@ -14,6 +18,7 @@ class LMStudioEmbedder:
         """
         self.client: OpenAI = OpenAI(base_url=base_url, api_key="lm-studio", timeout=60.0)
         self.model: str = model
+        logger.debug(f"Initialized LMStudioEmbedder: url={base_url}, model={model}")
 
     def embed(self, input: Union[str, List[str]]) -> Union[List[float], List[List[float]]]:
         """Generate embedding vector(s) for a string or list of strings.
@@ -33,31 +38,14 @@ class LMStudioEmbedder:
         if not texts:
             return [] if is_list else [0.0] * 1024
 
+        logger.debug(f"Embedding {len(texts)} item(s) with model '{self.model}'...")
         try:
             response = self.client.embeddings.create(model=self.model, input=texts)
             embeddings = [d.embedding for d in response.data]
+            logger.debug(f"Generated {len(embeddings)} embedding(s), dim={len(embeddings[0]) if embeddings else 0}")
             return embeddings if is_list else embeddings[0]
         except Exception as e:
             err_type = type(e).__name__
-            print(f"[LMStudioEmbedder.embed] LM Studio unavailable [{err_type}]: {e}. Using zero-vector fallback.")
+            logger.warning(f"LM Studio unavailable [{err_type}]: {e}. Using zero-vector fallback.")
             zero_vec = [0.0] * 1024
             return [zero_vec for _ in texts] if is_list else zero_vec
-
-
-
-# --- Test block ---
-# from kimiko.core.memory.lifecycle import *
-
-# server_ready = start_llm(BASE_URL)
-# embedder = LMStudioEmbedder(base_url=BASE_URL, model='text-embedding-bge-m3')
-
-# try:
-#     if server_ready:
-#         models = embedder.client.models.list()
-#         print("✅ Connection OK. Loaded models:", [m.id for m in models.data])
-#     else:
-#         print("❌ Timeout! Check if lms CLI is functioning.")
-# except Exception as e:
-#     print("❌ Error during interaction:", repr(e))
-# finally:
-#     end_llm()

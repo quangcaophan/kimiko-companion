@@ -1,6 +1,10 @@
 from typing import Dict, Any
 from pathlib import Path
 
+from kimiko.core.logger import get_logger
+
+logger = get_logger("avatar.actions")
+
 ANIMATION_DIR = Path("animations/mixamo")
 
 
@@ -11,6 +15,7 @@ ACTION_ANIMATIONS: Dict[str, Dict[str, Any]] = {
     "kiss":         {"file": "Kiss.fbx",              "play_once": True,  "lock_position": False},
     "flyingkick":   {"file": "Flying Kick.fbx",       "play_once": True,  "lock_position": False},
 }
+
 
 def execute(action_name: str) -> Dict[str, Any]:
     """Resolve an LLM action name into a broadcast-ready Three.js Mixamo animation payload.
@@ -25,8 +30,10 @@ def execute(action_name: str) -> Dict[str, Any]:
     normalized_name = str(action_name or "").lower().strip()
     entry = ACTION_ANIMATIONS.get(normalized_name)
     if not entry:
-        print(f"[avatar.actions] Unrecognized action {action_name!r}. Falling back to 'wave'.")
+        logger.warning(f"Unrecognized action {action_name!r}. Falling back to default 'wave'.")
         entry = ACTION_ANIMATIONS["wave"]
+    else:
+        logger.debug(f"Resolved action '{normalized_name}' -> file '{entry['file']}'")
 
     anim_path = ANIMATION_DIR / entry["file"]
     return {
@@ -38,15 +45,3 @@ def execute(action_name: str) -> Dict[str, Any]:
         "lock_position": entry["lock_position"],
         "track_position": True,
     }
-
-
-
-# if __name__ == "__main__":
-#     for action in ["wave", "walk", "backflip", "kiss", "flyingkick"]:
-#         payload = execute(action)   
-#         print(action, "->", payload["animation_url"])
-#         assert payload["type"] == "start_mixamo"
-#         assert os.path.exists(payload["animation_url"]), f"File not found: {payload['animation_url']}"
-
-#     payload_unknown = execute("nonexistent_action")
-#     assert payload_unknown["animation_url"].endswith("Waving.fbx")

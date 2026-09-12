@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <title>VRM Audio Lip Sync</title>
@@ -8,7 +9,9 @@
   <style>
     /* Hide flat-screen UI when in VR */
     body.vr-active .ui-container,
-    body.vr-active .toggle-button { display: none; }
+    body.vr-active .toggle-button {
+      display: none;
+    }
   </style>
   <script type="importmap">
   {
@@ -21,31 +24,99 @@
   }
   </script>
 </head>
-<body>
-<!-- SUBTITLE CONTAINER, UNCOMMENT THIS AND SUBTITLES IN APP JS FOR IN BROWSER MODE-->
-<!-- IF OBS STREAMING, COMMENT OUT THIS ONE AND THE ONE IN APP JS FOR SEPERATE OVERLAYS -->
 
-<div id="subtitle-container"></div>
+<body>
+
+  <!-- Audio Unlock Overlay: Required by browser autoplay policy -->
+  <div id="audio-unlock-overlay" style="
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.82);
+    backdrop-filter: blur(8px);
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    color: #fff;
+    cursor: pointer;
+  " onclick="window._dismissAudioOverlay()">
+    <div style="font-size: 3rem; margin-bottom: 1rem;">🎧</div>
+    <h2 style="margin: 0 0 0.5rem; font-size: 1.4rem; font-weight: 600;">Click to Start</h2>
+    <p style="margin: 0 0 1.5rem; opacity: 0.65; font-size: 0.9rem;">Tap anywhere to enable Kimiko's voice</p>
+    <button id="audio-unlock-btn" style="
+      padding: 0.75rem 2rem;
+      border: none; border-radius: 999px;
+      background: linear-gradient(135deg, #a78bfa, #ec4899);
+      color: #fff; font-size: 1rem; font-weight: 600;
+      cursor: pointer; box-shadow: 0 4px 20px rgba(167,139,250,0.4);
+      pointer-events: none;
+    ">▶ Enter</button>
+  </div>
+
+  <script>
+    // Inline (non-module) script — runs immediately, no ES module timing issues
+    window._audioUnlockedByGesture = false;
+    window._dismissAudioOverlay = function() {
+      var overlay = document.getElementById('audio-unlock-overlay');
+      if (!overlay || overlay.style.display === 'none') return;
+
+      // Unlock AudioContext right here in the gesture stack
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) {
+          var ctx = new AC();
+          var resume = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve();
+          resume.then(function() {
+            var buf = ctx.createBuffer(1, 1, 22050);
+            var src = ctx.createBufferSource();
+            src.buffer = buf;
+            src.connect(ctx.destination);
+            src.start(0);
+            console.log('✅ AudioContext unlocked.');
+          });
+        }
+      } catch(e) { console.warn('AudioContext unlock:', e); }
+
+      window._audioUnlockedByGesture = true;
+      // If PlaybackController already initialized, mark it unlocked too
+      if (window.playbackController) {
+        window.playbackController._unlocked = true;
+      }
+      overlay.style.display = 'none';
+    };
+
+    // Also allow pressing any key to dismiss
+    window.addEventListener('keydown', function(e) {
+      var overlay = document.getElementById('audio-unlock-overlay');
+      if (overlay && overlay.style.display !== 'none') {
+        window._dismissAudioOverlay();
+      }
+    }, { once: true });
+  </script>
+
+
+  <!-- SUBTITLE CONTAINER, UNCOMMENT THIS AND SUBTITLES IN APP JS FOR IN BROWSER MODE-->
+  <!-- IF OBS STREAMING, COMMENT OUT THIS ONE AND THE ONE IN APP JS FOR SEPERATE OVERLAYS -->
+
+  <div id="subtitle-container"></div>
 
   <!-- <div id="status">Initializing...</div> -->
 
   <!-- VRM canvas will be injected by app.js -->
-  
+
   <!-- Hide/Show UI Button -->
   <button id="toggle-ui-button" class="toggle-button">
     <svg class="icon" viewBox="0 0 24 24">
-      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
     </svg>
   </button>
 
   <!-- Toggle Subtitles Button -->
   <button id="toggle-subtitles-button" class="toggle-button toggle-subtitles">
     <svg class="icon" viewBox="0 0 24 24">
-      <rect x="2" y="4" width="20" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+      <rect x="2" y="4" width="20" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
       <text x="6" y="15.5" font-size="9" font-weight="bold" fill="currentColor" stroke="none">CC</text>
     </svg>
   </button>
-  
+
   <div class="ui-container">
     <!-- Image Preview Section (Hidden by default) -->
     <div class="image-preview-section" id="image-preview-section">
@@ -62,40 +133,36 @@
       <div class="left-buttons" id="left-buttons">
         <label for="image-input" class="plus-upload">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14"/>
+            <path d="M12 5v14M5 12h14" />
           </svg>
         </label>
       </div>
 
       <!-- Text input area -->
       <div class="text-input-wrapper">
-        <textarea 
-          id="text-input" 
-          placeholder="Type a message..." 
-          rows="1"
-        ></textarea>
+        <textarea id="text-input" placeholder="Type a message..." rows="1"></textarea>
       </div>
-      
+
       <!-- Right side buttons -->
       <div class="right-buttons" id="right-buttons">
         <button id="mic-button">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-            <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
-            <path d="M12 18v4"/>
-            <path d="M8 22h8"/>
+            <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+            <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+            <path d="M12 18v4" />
+            <path d="M8 22h8" />
           </svg>
         </button>
-        
+
         <button id="send-button" class="send-button" disabled>
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m22 2-7 20-4-9-9-4Z"/>
-            <path d="M22 2 11 13"/>
+            <path d="m22 2-7 20-4-9-9-4Z" />
+            <path d="M22 2 11 13" />
           </svg>
         </button>
       </div>
     </div>
-    
+
     <input type="file" id="image-input" accept="image/*" hidden />
   </div>
 
@@ -104,4 +171,5 @@
 
 
 </body>
+
 </html>

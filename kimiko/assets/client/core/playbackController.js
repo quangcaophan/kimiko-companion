@@ -72,12 +72,14 @@ export class PlaybackController {
 
   // Unlock audio on user gesture - tries multiple strategies
   async unlockOnce() {
-    if (this._unlocked) return true;
+    // Even if already unlocked, always ensure the AudioContext is running
+    // (it can become suspended after inactivity or if created without gesture)
+    let ctx = this.audioMgr.audioContext;
+    if (this._unlocked && ctx && ctx.state === 'running') return true;
 
     this.initPersistent();
 
     // 1) Try to resume/create AudioContext
-    let ctx = null;
     try {
       if (!this.audioMgr.audioContext) {
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -162,17 +164,34 @@ export class PlaybackController {
     try {
       if (this.audioMgr.audioContext && this.el && !this.audioMgr.analyser && !this._analyserAttached) {
         try {
-          const src = this.audioMgr.audioContext.createMediaElementSource(this.el);
-          const analyser = this.audioMgr.audioContext.createAnalyser();
-          analyser.fftSize = 2048;
-          src.connect(analyser);
-          analyser.connect(this.audioMgr.audioContext.destination);
-          this.audioMgr.analyser = analyser;
-          this.audioMgr.timeDomainData = new Uint8Array(analyser.fftSize);
-          this.audioMgr.freqData = new Uint8Array(analyser.frequencyBinCount);
-          this._analyserAttached = true;
+          // Use captureStream() instead of createMediaElementSource().
+          // createMediaElementSource() HIJACKS the element — audio ONLY flows through
+          // the Web Audio graph, bypassing the browser's default speaker output.
+          // captureStream() is NON-DESTRUCTIVE: the element still outputs to speakers
+          // normally, and we get a parallel copy for lip-sync analysis.
+          const stream = this.el.captureStream ? this.el.captureStream()
+                       : this.el.mozCaptureStream ? this.el.mozCaptureStream()
+                       : null;
+
+          if (stream && stream.getAudioTracks().length > 0) {
+            const src = this.audioMgr.audioContext.createMediaStreamSource(stream);
+            const analyser = this.audioMgr.audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            src.connect(analyser);
+            // NOTE: Do NOT connect analyser to destination — we're only analysing,
+            // not routing. Audio already plays via the element's default output.
+            this.audioMgr.analyser = analyser;
+            this.audioMgr.timeDomainData = new Uint8Array(analyser.fftSize);
+            this.audioMgr.freqData = new Uint8Array(analyser.frequencyBinCount);
+            this._analyserAttached = true;
+            console.log('✅ Analyser attached via captureStream (non-destructive)');
+          } else {
+            console.warn('captureStream not available — lip sync disabled, audio plays normally');
+            this._analyserAttached = true; // Prevent retry loops
+          }
         } catch (e) {
           console.warn('attachAnalyser failed:', e);
+          this._analyserAttached = true; // Prevent retry loops
         }
       }
     } catch (e) {
@@ -192,6 +211,29 @@ export class PlaybackController {
 
     const abs = ensureAbsoluteUrl(url);
     const el = this.el;
+    const ctx = this.audioMgr.audioContext;
+
+    // --- DEEP DIAGNOSTICS ---
+    console.group(`🔍 playAudioUrl: ${url}`);
+    console.log('  abs URL  :', abs);
+    console.log('  unlocked :', this._unlocked);
+    console.log('  ctx state:', ctx ? ctx.state : 'NO CONTEXT');
+    console.log('  analyser :', this._analyserAttached ? 'attached' : 'not attached');
+    console.log('  el.volume:', el ? el.volume : 'NO EL');
+    console.log('  el.muted :', el ? el.muted : 'N/A');
+
+    // Listen for audio element errors
+    const onError = () => {
+      const err = el.error;
+      console.error('❌ Audio element error!', {
+        code: err?.code,
+        message: err?.message,
+        networkState: el.networkState,  // 0=empty 1=idle 2=loading 3=no_src
+        readyState: el.readyState,      // 0=nothing 4=enough_data
+        src: el.src
+      });
+    };
+    el.addEventListener('error', onError, { once: true });
 
     // Stop current playback
     try { el.pause(); el.currentTime = 0; } catch (e) {}
@@ -204,52 +246,64 @@ export class PlaybackController {
 
     // Ensure AudioContext running
     try {
-      if (this.audioMgr.audioContext && this.audioMgr.audioContext.state === 'suspended') {
-        await this.audioMgr.audioContext.resume();
+      if (ctx && ctx.state !== 'running') {
+        console.log('  🔄 Resuming ctx...');
+        await ctx.resume();
+        console.log('  ✅ ctx resumed, state:', ctx.state);
       }
-    } catch (e) {}
+    } catch (e) { console.warn('  ⚠️ ctx resume failed:', e); }
 
     // Try to play
     try {
       await el.play();
+      el.removeEventListener('error', onError);
+      console.log('  ▶ play() OK | currentTime:', el.currentTime, '| duration:', el.duration, '| paused:', el.paused, '| volume:', el.volume, '| muted:', el.muted);
+      // Check if audio is actually advancing after 400ms
+      setTimeout(() => {
+        console.log(`  ⏱ 400ms check | currentTime: ${el.currentTime.toFixed(3)} | paused: ${el.paused} | ended: ${el.ended}`);
+        console.groupEnd();
+      }, 400);
       this._tryAttachAnalyser();
       return true;
     } catch (err) {
-      console.warn('play() blocked, attempting muted-first fallback:', err);
+      console.warn('  play() blocked:', err.name, err.message);
     }
 
     // Muted-first fallback
     try {
+      console.log('  🔇 Trying muted-first...');
       el.muted = true;
       await el.play();
       await new Promise(r => setTimeout(r, 80));
       el.muted = false;
+      console.log('  ✅ Muted-first OK, unmuted');
       this._tryAttachAnalyser();
+      console.groupEnd();
       return true;
     } catch (err) {
-      console.warn('Muted-first failed:', err);
+      console.warn('  Muted-first failed:', err);
     }
 
-    // Transient fallback (rare)
+    // Transient fallback: fresh Audio element (bypasses all caching & context issues)
     try {
+      console.log('  🆕 Trying fresh Audio() element...');
       const tmp = new Audio(abs);
       tmp.playsInline = true;
-      tmp.crossOrigin = 'anonymous';
-      tmp.setAttribute('playsinline', '');
-      tmp.setAttribute('webkit-playsinline', '');
+      tmp.volume = 1.0;
       document.body.appendChild(tmp);
       await tmp.play();
-      el.src = abs;
-      try { el.load(); } catch (e) {}
-      tmp.pause();
-      tmp.remove();
-      this._tryAttachAnalyser();
+      console.log('  ✅ Fresh Audio() playing! duration:', tmp.duration);
+      // Wait for it to finish, then clean up
+      tmp.addEventListener('ended', () => { try { tmp.remove(); } catch(e){} });
+      console.groupEnd();
       return true;
     } catch (err) {
-      console.warn('Transient fallback failed:', err);
+      console.warn('  Fresh Audio() failed:', err);
     }
 
-    console.error('All playback strategies failed for', abs);
+    el.removeEventListener('error', onError);
+    console.error('  ❌ ALL strategies failed for', abs);
+    console.groupEnd();
     return false;
   }
 }

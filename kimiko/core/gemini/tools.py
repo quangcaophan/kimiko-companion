@@ -1,7 +1,7 @@
 ACTION_TOOLS =[{
     "type": "function",
     "name": "perform_action",
-    "description": "Perform a physical avatar action: wave, walk, backflip, kiss, dropkick",
+    "description": "Perform a physical avatar action: wave, walk, backflip, kiss, flyingkick",
     "parameters": {
         "type": "object",
         "properties": {

@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 
+from kimiko.core.logger import get_logger
+
+logger = get_logger("memory.db")
 
 
 class MemoryDB:
@@ -23,7 +26,7 @@ class MemoryDB:
             try:
                 os.makedirs(db_dir, exist_ok=True)
             except OSError as e:
-                print(f"[MemoryDB] Failed to create database directory {db_dir}: {e}")
+                logger.error(f"Failed to create database directory {db_dir}: {e}")
 
 
         self.init_db()
@@ -43,7 +46,7 @@ class MemoryDB:
             with conn:
                 yield conn
         except sqlite3.Error as e:
-            print(f"[MemoryDB] Database error: {e}")
+            logger.error(f"Database error: {e}")
             raise
         finally:
             conn.close()

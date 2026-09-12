@@ -29,7 +29,8 @@ def _talk_payload(audio_path: Path, text: str, duration: int = 1, expression: st
         "audio_path": str(audio_path),
         "expression": expression,
         "audio_text": text,
-        "audio_duraction": duration,
+        "audio_duration": duration,
+        "audio_duraction": duration,  # Backward compatibility
     }
 
 

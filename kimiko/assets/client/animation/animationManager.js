@@ -259,8 +259,9 @@ export class AnimationManager {
 
   play() {
     this.audioMgr.resetMouth();
-    this.audioMgr.audioElement.currentTime = 0;
-    this.audioMgr.audioElement.play().catch(() => {});
+    if (this.audioMgr.audioElement && this.audioMgr.audioElement.paused) {
+      this.audioMgr.audioElement.play().catch(() => {});
+    }
     this.isPlaying = true;
   }
 

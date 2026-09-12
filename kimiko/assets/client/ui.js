@@ -312,6 +312,16 @@ async function sendMessage() {
     return;
   }
 
+  // ✅ Unlock AudioContext HERE — this is the user gesture moment.
+  // Must happen synchronously before any await, so the browser allows it.
+  try {
+    if (window.playbackController) {
+      await window.playbackController.unlockOnce();
+    }
+  } catch (e) {
+    console.warn('Audio pre-unlock failed (non-critical):', e);
+  }
+
   try {
     // If we have an image, upload it first
     if (currentImageFile) {
@@ -396,6 +406,12 @@ if (document.fonts && document.fonts.ready) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!sendButton.disabled) {
+        // Unlock audio here too — keydown is a valid browser gesture
+        try {
+          if (window.playbackController) {
+            window.playbackController.unlockOnce().catch(() => {});
+          }
+        } catch (err) {}
         await sendMessage();
       }
     }

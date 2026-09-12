@@ -18,11 +18,7 @@ import { initWebcam, takePictureAndUpload } from './interaction/webcam.js';
 import { connectWS, initUI } from './ui.js';
 import { initVRMClickDetector } from './interaction/vrmClickDetector.js';
 
-// --- WebSocket + UI (early init, no dependencies) ---
-function handleServerMessage(msg) {
-  console.log("📩 Received from server:", msg);
-}
-connectWS(handleServerMessage);
+// --- UI Init ---
 initUI();
 
 // --- Subtitle toggle ---
@@ -35,8 +31,8 @@ if (subtitleBtn) {
   });
 }
 
-// Initialize webcam
-await initWebcam();
+// Initialize webcam non-blockingly so missing camera never breaks 3D avatar or chat
+initWebcam().catch(err => console.warn("Webcam optional init skipped:", err));
 
 // --- App State ---
 let vrm = null;
@@ -132,6 +128,12 @@ const clock = new THREE.Clock();
   // --- Playback Controller (mobile audio unlock) ---
   playbackController = new PlaybackController(audioMgr);
   playbackController.initPersistent();
+
+  // If user already clicked the unlock overlay before VRM finished loading, apply now
+  if (window._audioUnlockedByGesture) {
+    playbackController._unlocked = true;
+    console.log('✅ PlaybackController marked unlocked from prior gesture.');
+  }
 
   window.playbackController = playbackController;
   window.audioMgr = audioMgr;
@@ -256,17 +258,32 @@ const clock = new THREE.Clock();
 
     // --- Audio playback ---
     if (msg.type === 'start_animation') {
-      const { audio_path, expression = 'neutral', audio_text, audio_duraction } = msg;
+      const { audio_path, expression = 'neutral', audio_text } = msg;
+      const duration = msg.audio_duration ?? msg.audio_duraction;
+      console.log('🎵 start_animation received:', audio_path, 'duration:', duration);
       audioMgr.setExpression(expression);
 
       // Show subtitles while this chunk plays
-      if (audio_text && audio_duraction) {
-        showSubtitleStreaming(audio_text, audio_duraction);
+      if (audio_text && duration) {
+        showSubtitleStreaming(audio_text, duration);
       }
 
       try {
-        try { await playbackController.unlockOnce(); } catch (e) { }
+        // Step 1: Always try to resume AudioContext — works after any prior user interaction
+        const ctx = audioMgr.audioContext;
+        if (ctx && ctx.state !== 'running') {
+          console.log('🔄 AudioContext state:', ctx.state, '— resuming...');
+          try { await ctx.resume(); console.log('✅ AudioContext resumed'); }
+          catch (e) { console.warn('⚠️ AudioContext resume failed:', e); }
+        } else if (ctx) {
+          console.log('✅ AudioContext already running');
+        } else {
+          console.warn('⚠️ No AudioContext available');
+        }
+
+        // Step 2: Play audio
         const ok = await playbackController.playAudioUrl(audio_path);
+        console.log('🔊 playAudioUrl result:', ok, 'for', audio_path);
         if (!ok) console.warn('Playback failed (animation will still run)');
         animationMgr.play();
       } catch (e) {

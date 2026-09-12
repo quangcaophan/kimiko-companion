@@ -1,12 +1,14 @@
 from typing import Optional, Union
-from groq import Groq
-from dotenv import load_dotenv
 import os
+import time
+from groq import Groq
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
 
-load_dotenv()
+from kimiko.core.logger import get_logger
+
+logger = get_logger("audio.asr")
 
 
 class GroqASR:
@@ -19,12 +21,14 @@ class GroqASR:
         
     def get_groq_client(self) -> Optional[Groq]:
         if not self.api_key:
-            print("[GroqASR] Warning: GROQ_API_KEY not set. Voice transcription will be disabled.")
+            logger.warning("GROQ_API_KEY is not set. Voice recording and transcription will be disabled.")
             return None
         try:
-            return Groq(api_key=self.api_key)
+            client = Groq(api_key=self.api_key)
+            logger.debug("Groq ASR client initialized successfully.")
+            return client
         except Exception as e:
-            print(f"[GroqASR] Failed to initialize Groq client: {e}")
+            logger.error(f"Failed to initialize Groq ASR client: {e}")
             return None
 
     def record(
@@ -54,10 +58,11 @@ class GroqASR:
             devices = sd.query_devices()
             input_devs = [d for d in devices if isinstance(d, dict) and d.get("max_input_channels", 0) > 0]
             if not input_devs:
-                print("[GroqASR.record] No microphone or audio input hardware detected.")
+                logger.error("No microphone or audio input hardware detected by sounddevice.")
                 return False
+            logger.debug(f"Detected {len(input_devs)} audio input device(s): {[d.get('name') for d in input_devs]}")
         except Exception as e:
-            print(f"[GroqASR.record] Failed to query audio devices: {e}")
+            logger.error(f"Failed to query audio input devices: {e}")
             return False
 
         output_dir = os.path.dirname(output_file)
@@ -65,27 +70,28 @@ class GroqASR:
             try:
                 os.makedirs(output_dir, exist_ok=True)
             except OSError as e:
-                print(f"[GroqASR.record] Failed to create output directory {output_dir}: {e}")
+                logger.error(f"Failed to create audio output directory {output_dir}: {e}")
                 return False
 
         try:
             chunk_duration = 0.1
             block_size = int(samplerate * chunk_duration)
 
-            recored_frames = []
+            recorded_frames = []
             has_spoken = False
             silence_frames = 0.0
             wait_time = 0.0
             max_wait_timeout = 15.0
 
+            logger.info("Listening for speech... Speak now (or wait 15s to timeout)...")
+
             with sd.InputStream(samplerate=samplerate, channels=channels, blocksize=block_size,
                                 device=device, dtype="float32") as stream:
-                print("Listening... Speak now (press Ctrl+C to cancel)...")
 
                 while True:
                     data, overflowed = stream.read(block_size)
                     if overflowed:
-                        print("⚠️ Audio input overflow, possible dropped frames")
+                        logger.warning("Audio input buffer overflowed, possible dropped frames.")
 
                     if data is None or len(data) == 0:
                         continue
@@ -96,62 +102,68 @@ class GroqASR:
                     if not has_spoken:
                         if volume > silence_threshold:
                             has_spoken = True
-                            print("Voice detected, recording...")
-                            recored_frames.append(data)
+                            logger.info(f"Voice detected (RMS volume: {volume:.4f} > {silence_threshold}). Recording...")
+                            recorded_frames.append(data)
                         else:
                             wait_time += chunk_duration
                             if wait_time >= max_wait_timeout:
-                                print("No speech detected within timeout (15s)")
+                                logger.info("No speech detected within 15s timeout window.")
                                 break
                     else:
-                        recored_frames.append(data)
+                        recorded_frames.append(data)
                         if volume < silence_threshold:
                             silence_frames += chunk_duration
                             if silence_frames >= silence_duration:
-                                print("Silence detected, stopping recording")
+                                logger.debug(f"Silence detected ({silence_frames:.1f}s >= {silence_duration}s). Finishing capture.")
                                 break
                         else:
                             silence_frames = 0.0
             
-            if not recored_frames or not has_spoken:
+            if not recorded_frames or not has_spoken:
+                logger.debug("No recorded speech frames collected.")
                 return False
             
-            audio_data = np.concatenate(recored_frames, axis=0)
+            audio_data = np.concatenate(recorded_frames, axis=0)
             sf.write(output_file, audio_data, samplerate)
+            dur = len(audio_data) / samplerate
+            logger.info(f"Audio captured successfully: {output_file} ({dur:.2f}s, {len(audio_data)} samples)")
             return True
 
         except KeyboardInterrupt:
-            print("\nRecording canceled by user.")
+            logger.info("Recording canceled by user.")
             return False
         except sd.PortAudioError as e:
-            print(f"[GroqASR.record] Audio hardware error (device={device}): {e}")
+            logger.error(f"PortAudio hardware error (device={device}): {e}")
             return False
         except Exception as e:
-            print(f"[GroqASR.record] Unexpected recording error: {e}")
+            logger.error(f"Unexpected audio recording error: {e}")
             return False
 
     def transcribe(self, aud_path: str) -> str:
         """Transcribe a WAV via Groq Whisper-large-v3. Returns the spoken text or empty string on error."""
         if not self.client:
-            print("[GroqASR.transcribe] Groq client not configured or GROQ_API_KEY missing.")
+            logger.warning("Groq client not configured or GROQ_API_KEY missing. Cannot transcribe.")
             return ""
 
         if not aud_path:
-            print("[GroqASR.transcribe] No audio path provided.")
+            logger.warning("No audio path provided for transcription.")
             return ""
 
         if not os.path.isfile(aud_path):
-            print(f"[GroqASR.transcribe] Audio file not found: {aud_path}")
+            logger.error(f"Audio file not found on disk: {aud_path}")
             return ""
 
         try:
-            if os.path.getsize(aud_path) == 0:
-                print(f"[GroqASR.transcribe] Audio file is empty (0 bytes): {aud_path}")
+            size_bytes = os.path.getsize(aud_path)
+            if size_bytes == 0:
+                logger.error(f"Audio file is empty (0 bytes): {aud_path}")
                 return ""
         except OSError as e:
-            print(f"[GroqASR.transcribe] Failed to inspect audio file: {e}")
+            logger.error(f"Failed to inspect audio file {aud_path}: {e}")
             return ""
 
+        logger.info(f"Transcribing {os.path.basename(aud_path)} ({size_bytes} bytes) via Groq Whisper Large v3...")
+        t_start = time.time()
         try:
             with open(aud_path, "rb") as file:
                 transcription = self.client.audio.transcriptions.create(
@@ -161,24 +173,10 @@ class GroqASR:
                     prompt=self.context_prompt
                 )
             text = (transcription.text or "").strip()
-            print(f"[GroqASR.transcribe] Recognized: {text!r}")
+            elapsed = time.time() - t_start
+            logger.info(f"Transcription finished in {elapsed:.2f}s: {text!r}")
             return text
         except Exception as e:
-            # Catch groq-specific errors if available, fallback to general Exception
             err_name = type(e).__name__
-            print(f"[GroqASR.transcribe] API transcription failed [{err_name}]: {e}")
+            logger.error(f"Groq API transcription failed [{err_name}]: {e}")
             return ""
-
-
-
-# if __name__ == "__main__":
-#     asr = GroqASR(api_key=os.getenv("GROQ_API_KEY"), context_prompt="Conversation between Kimiko and the user")
-
-#     ok = asr.record("test_delay.wav", silence_duration=1.5, device=2)
-#     if ok:
-#         duration = sf.info("test_delay.wav").duration
-#         print("Duration:", duration)
-#         text = asr.transcribe("test_delay.wav")
-#         print("Spoken text:", text)
-#     else:
-#         print("Recording failed (no speech detected or mic unavailable)")

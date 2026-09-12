@@ -16,5 +16,12 @@ test.ipynb
 # Documents
 doc/
 
-runtime
+# Generated audio temp files
+kimiko/assets/client/audio/temp/
+
+# Runtime & test artifacts
 *.wav
+*.log
+
+# Resume
+resume/

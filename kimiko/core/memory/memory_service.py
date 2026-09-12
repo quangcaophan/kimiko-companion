@@ -1,7 +1,10 @@
 import time
 from typing import Optional, Any, List, Dict, Tuple
+from kimiko.core.logger import get_logger
 from kimiko.core.memory.db import MemoryDB
 from kimiko.core.memory.vector_store import PersistentHybridStore
+
+logger = get_logger("memory.service")
 
 
 class MemoryService:
@@ -18,13 +21,20 @@ class MemoryService:
         self.store = store
         self.window_size = window_size
         self.top_k = top_k
+        logger.debug(f"Initialized MemoryService: window_size={window_size}, top_k={top_k}")
     
     def get_context(self, user_text: str) -> Dict[str, Any]:
         """Retrieve relevant context for a user query: profile, semantic facts, and recent conversation turns."""
+        logger.debug(f"Fetching context for query: {user_text!r}")
         profile_summary = self.db.get_profile_summary()
         search_results = self.store.search(user_text, self.top_k)
         facts = [doc for doc, score in search_results]
         recent_turns = self.db.get_recent_turns(limit=self.window_size)
+
+        logger.debug(
+            f"Context built: profile_present={bool(profile_summary)}, "
+            f"facts_found={len(facts)}, recent_turns={len(recent_turns)}"
+        )
 
         return {
             "profile": profile_summary,
@@ -34,6 +44,7 @@ class MemoryService:
     
     def record_turn(self, role: str, content: str, session_id: int) -> None:
         """Record a conversation turn and flush aging turns outside the active window to vector memory."""
+        logger.debug(f"Inserting turn ({role}, session={session_id}): {content[:60]!r}...")
         self.db.insert_turn(role=role, content=content, ts=time.time())
         self._flush_aging_turns(session_id=session_id)
 
@@ -44,12 +55,14 @@ class MemoryService:
         if not aging_turns:
             return
         
+        logger.info(f"Flushing {len(aging_turns)} aged turn(s) out of sliding window to vector memory...")
         for turn in aging_turns:
             format_text = f"{turn['role']}: {turn['content']}"
             self.store.add_fact(content=format_text, session_id=session_id, ts=turn['ts'])
         
         turn_ids = [turn['id'] for turn in aging_turns]
         self.db.mark_turns_embedded(turn_ids)
+        logger.info(f"Successfully embedded and marked turn IDs: {turn_ids}")
     
     def build_system_prompt(self, persona: str, context: Dict[str, Any]) -> str:
         """Compose the full system instruction prompt with profile, retrieved facts, recent turns, and subtitle instructions."""
@@ -78,4 +91,4 @@ class MemoryService:
         )
 
     def maybe_summarize(self, session_id: int) -> None:
-        pass  # TODO: determine trigger criteria (see doc/implement plan.md)
+        pass

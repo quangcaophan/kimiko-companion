@@ -1,9 +1,10 @@
-// adjust these paths / URLs as needed
+const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+const host = typeof window !== 'undefined' && window.location.host ? window.location.host : 'localhost:8001';
+const origin = typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'http://localhost:8001';
 
 export const VRM_PATH = "./models/Kimiko1.vrm";
-// For mobile access, use the server's IP address instead of localhost
-export const WS_URL = "ws://localhost:8001/ws";
-export const HTTP_URL = "http://localhost:8001";
+export const WS_URL = `${isHttps ? 'wss:' : 'ws:'}//${host}/ws`;
+export const HTTP_URL = origin;
 
 export const MOUTH_THRESHOLD = 5;
 

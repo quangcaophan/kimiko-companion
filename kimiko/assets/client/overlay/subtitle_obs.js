@@ -12,7 +12,8 @@ ws.onmessage = ({ data }) => {
   }
 
   if (msg.type === 'start_animation') {
-    const { audio_text, audio_duraction } = msg;
-    showSubtitleStreaming(audio_text, audio_duraction, "letter");
+    const duration = msg.audio_duration ?? msg.audio_duraction;
+    const { audio_text } = msg;
+    showSubtitleStreaming(audio_text, duration, "letter");
   }
 };
