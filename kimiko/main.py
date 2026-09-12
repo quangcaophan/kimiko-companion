@@ -34,8 +34,8 @@ from kimiko.core.memory.vector_store import PersistentHybridStore
 from kimiko.core.memory.memory_service import MemoryService
 from kimiko.core.memory.lifecycle import start_llm
 from kimiko.core.gemini.adapter import GeminiAdapter
-from kimiko.core.gemini.tools import ACTION_TOOLS
 from kimiko.core.audio.tts import SovitsTTS, _start_sovits
+from kimiko.skills import SkillRegistry
 from kimiko.core.audio.asr import GroqASR
 from kimiko.core.avatar import actions
 from kimiko.core.avatar.playback_worker import PlaybackWorker
@@ -56,7 +56,7 @@ class KimikoCompanion:
         logger.info("=" * 65)
 
         # 1. Database & Memory
-        logger.info("--> [1/7] Initializing Memory Database...")
+        logger.info("--> [1/8] Initializing Memory Database...")
         db_file = _project_root / "kimiko" / "core" / "memory" / "memory.db"
         self.db = MemoryDB(str(db_file))
         self.session_id = self.db.get_or_create_session()
@@ -64,11 +64,11 @@ class KimikoCompanion:
         logger.debug(f"MemoryDB attached at: {db_file} (Active Session #{self.session_id})")
 
         # 2. LM Studio Embedding Server
-        logger.info("--> [2/7] Ensuring LM Studio embedding server is running...")
+        logger.info("--> [2/8] Ensuring LM Studio embedding server is running...")
         start_llm(base_url=self.config.embedding_url)
 
         # 3. Embedding & Vector Store
-        logger.info("--> [3/7] Connecting to LM Studio Embedder & Hybrid Store...")
+        logger.info("--> [3/8] Connecting to LM Studio Embedder & Hybrid Store...")
         self.embedder = LMStudioEmbedder(
             base_url=self.config.embedding_url,
             model=self.config.embedding_model
@@ -82,14 +82,14 @@ class KimikoCompanion:
         )
 
         # 4. Gemini LLM Adapter
-        logger.info("--> [4/7] Initializing Gemini Interactions Adapter...")
+        logger.info("--> [4/8] Initializing Gemini Interactions Adapter...")
         gemini_key = os.getenv("GEMINI_API_KEY")
         if not gemini_key:
             logger.warning("GEMINI_API_KEY not found in environment!")
         self.gemini = GeminiAdapter(model=self.config.gemini_model, api_key=gemini_key)
 
         # 5. Audio Services (ASR & TTS)
-        logger.info("--> [5/7] Initializing Audio Pipeline (Groq ASR & GPT-SoVITS TTS)...")
+        logger.info("--> [5/8] Initializing Audio Pipeline (Groq ASR & GPT-SoVITS TTS)...")
         self.asr = GroqASR(
             api_key=os.getenv("GROQ_API_KEY"),
             context_prompt="Conversation between Kimiko and developer Quang."
@@ -110,15 +110,24 @@ class KimikoCompanion:
         _start_sovits(base_url=sovits_url)
 
         # 6. Playback Worker
-        logger.info("--> [6/7] Initializing Avatar Playback Queue Worker...")
+        logger.info("--> [6/8] Initializing Avatar Playback Queue Worker...")
         self.worker = PlaybackWorker(broadcast_fn=ws_manager.broadcast_sync, pad_seconds=0.2)
         self.worker.start()
 
         # 7. Audio Cache Directory
-        logger.info("--> [7/7] Verifying Audio Cache Storage...")
+        logger.info("--> [7/8] Verifying Audio Cache Storage...")
         self.audio_cache_dir = _project_root / "kimiko" / "assets" / "client" / "audio" / "temp"
         self.audio_cache_dir.mkdir(parents=True, exist_ok=True)
         self.speech_counter = 0
+
+        # 8. Skill Registry (auto-discovers all *_skill.py modules)
+        logger.info("--> [8/8] Loading Skill Registry...")
+        self.skill_registry = SkillRegistry()
+        self.skill_registry.auto_discover()
+        logger.info(
+            f"Skills loaded: {list(self.skill_registry.skills.keys())} "
+            f"({len(self.skill_registry.get_all_tool_definitions())} tools)"
+        )
 
         self.persona = self.config.persona
 
@@ -199,16 +208,20 @@ class KimikoCompanion:
                 "expression": "relaxed"
             })
 
-    def _on_action_callback(self, action_name: str, args: dict) -> dict:
-        """Called by turn engine when LLM triggers a tool action."""
-        logger.info(f"[Action Invocation]: '{action_name}' | Args: {args}")
-        resolved_action = args.get("action", action_name)
-        payload = actions.execute(resolved_action)
+    def _on_tool_callback(self, tool_name: str, args: dict) -> dict:
+        """Called by turn engine when LLM triggers any tool call. Routes through SkillRegistry."""
+        logger.info(f"[Tool Invocation]: '{tool_name}' | Args: {args}")
+        result = self.skill_registry.execute_tool(tool_name, args)
 
-        duration = 3.0 if resolved_action in {"backflip", "flyingkick"} else 2.0
-        self.worker.enqueue_action(action_payload=payload, duration=duration)
-        logger.info(f"Action '{resolved_action}' enqueued to PlaybackWorker (duration: {duration}s)")
-        return {"status": "success", "executed_action": resolved_action}
+        # Special handling for avatar actions — enqueue animation to PlaybackWorker
+        if tool_name == "perform_action" and result.get("status") == "success":
+            payload = result.get("payload", {})
+            action = result.get("action", "")
+            duration = result.get("duration") or payload.get("duration", 2.5)
+            self.worker.enqueue_action(action_payload=payload, duration=duration)
+            logger.info(f"Action '{action}' enqueued to PlaybackWorker (duration: {duration}s)")
+
+        return result
 
     def chat_turn(self, user_text: str) -> str:
         """Process one conversational turn."""
@@ -231,9 +244,9 @@ class KimikoCompanion:
             persona=self.persona,
             memory=self.memory_service,
             gemini=self.gemini,
-            tools=ACTION_TOOLS,
+            tools=self.skill_registry.get_all_tool_definitions(),
             on_sentence=self._on_sentence_callback,
-            on_action=self._on_action_callback
+            on_action=self._on_tool_callback
         )
         return response
 
